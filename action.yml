@@ -15,6 +15,18 @@ inputs:
       repositories, or to have CI run against the pull requests this opens.
     default: ${{ github.token }}
 
+  pin-ranges:
+    description: >-
+      Update dependencies written as a version range, rewriting them as the
+      exact version they resolve to. `sparkfun/SparkFun BME280@^2.0.9` becomes
+      `sparkfun/SparkFun BME280 @ 2.0.9`.
+
+      Off by default, matching upstream, which skips ranges entirely. Turning it
+      on proposes a change even when the range already admits the newest
+      version, because replacing the range with a pin is itself the change --
+      that is what makes the build reproducible from the file alone.
+    default: "false"
+
   cooldown:
     description: "Delay dependency updates for a number of days"
     default: "3"
@@ -49,5 +61,6 @@ runs:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
         GITHUB_TOKEN: ${{ inputs.token }}
         LABELS: ${{ inputs.labels }}
+        PIN_RANGES: ${{ inputs.pin-ranges }}
         OPEN_PULL_REQUESTS_LIMIT: ${{ inputs.open-pull-requests-limit }}
         PROJECT_DIR: ${{ inputs.project-dir }}

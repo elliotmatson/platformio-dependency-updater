@@ -27,6 +27,7 @@ class Dependency:
 class Defaults:
     COOLDOWN: str = "3"
     LABELS: str = "dependencies,platformio"
+    PIN_RANGES: str = "false"
     OPEN_PULL_REQUESTS_LIMIT: str = "5"
     PROJECT_DIR: str = "."
 
@@ -35,6 +36,7 @@ class Defaults:
 class Inputs:
     COOLDOWN: str = "COOLDOWN"
     LABELS: str = "LABELS"
+    PIN_RANGES: str = "PIN_RANGES"
     OPEN_PULL_REQUESTS_LIMIT: str = "OPEN_PULL_REQUESTS_LIMIT"
     PROJECT_DIR: str = "PROJECT_DIR"
 

@@ -76,18 +76,27 @@ class Search(typing.TypedDict):
 
 class Resolve:
     cooldown: datetime.timedelta
+    pin_ranges: bool
     _api: re.Pattern[str]
     _download: re.Pattern[str]
     _package: re.Pattern[str]
+    _range: re.Pattern[str]
 
-    def __init__(self, cooldown: datetime.timedelta) -> None:
+    def __init__(self, cooldown: datetime.timedelta, pin_ranges: bool = False) -> None:
         """
         Initialize dependency resolution with the release cooldown and matching patterns.
 
         Parameters:
                 cooldown (datetime.timedelta): Minimum age required for a release to be eligible.
+                pin_ranges (bool): Update dependencies expressed as a version range, rewriting
+                        them as an exact version.
         """
         self.cooldown = cooldown
+        self.pin_ranges = pin_ranges
+        # PlatformIO accepts semver ranges: ^2.0.9, ~1.4.0, >=1.0.0, and comma
+        # separated pairs such as >=1.0.0,<2.0.0. The lowest version a range
+        # admits is its first bound, which is the baseline to compare against.
+        self._range = re.compile(r"^(?:\^|~|>=|>|<=|<|=)?\s*(?P<version>\d[^\s,|]*)")
         self._api = re.compile(
             r"^(?:(?P<package>(?:[^/\s]+/)?[^/\s]+)?\s*@\s*)?https://api\.registry\.platformio\.org/v3/download/(?P<owner>[^/\s]+)/(?:library|platform|tool)/(?P<name>[^/\s]+)/(?P<version>[^/\s]+)/(?P<file>[^/\s]+)(?:\s*;.*)?$"
         )
@@ -96,6 +105,28 @@ class Resolve:
         )
         self._name = re.compile(r"^(?P<name>[^/@]+?)\s*@\s*(?P<version>[^\s]+)\S*(?:\s*;.*)?$")
         self._package = re.compile(r"^(?P<owner>[^/\s]+)/(?P<name>[^/@]+?)\s*@\s*(?P<version>[^\s]+)\S*(?:\s*;.*)?$")
+
+    def _requested(self, spec: str) -> tuple[packaging.version.Version, str, bool]:
+        """Interpret the version a dependency asks for.
+
+        Returns the version to compare against, the string form of it, and
+        whether the spec was a range rather than an exact pin.
+
+        A range does not parse as a version, so without pin_ranges these
+        dependencies raise and are reported as unresolved -- which is why
+        `adafruit/Adafruit NeoPixel@^1.15.5` never moved. With it, the range's
+        lower bound becomes the baseline and the caller rewrites the dependency
+        as the exact version it resolved to.
+        """
+        try:
+            return packaging.version.Version(spec), spec, False
+        except packaging.version.InvalidVersion:
+            if not self.pin_ranges:
+                raise
+            match = self._range.match(spec)
+            if not match:
+                raise
+            return packaging.version.Version(match["version"]), match["version"], True
 
     def api(self, dependency: models.Dependency) -> models.Result | str | None:
         """
@@ -190,15 +221,17 @@ class Resolve:
         match = typing.cast(Name | None, self._name.fullmatch(dependency.value))
         if not match:
             return None
-        version = packaging.version.Version(match["version"])
-        data = self._request_search(dependency.option, match["name"], match["version"])
+        version, _requested, ranged = self._requested(match["version"])
+        data = self._request_search(dependency.option, match["name"], _requested)
         if not data:
             return None
         _version = self._parse(data, version)
         if _version is None:
             return None
         value = f"{data['owner']['username']}/{data['name']} @ {_version['name']}"
-        if packaging.version.Version(_version["name"]) > version:
+        # A range is rewritten even when it already admits the newest version:
+        # replacing it with an exact pin is itself the change being proposed.
+        if ranged or packaging.version.Version(_version["name"]) > version:
             type_ = self._type_html(data["type"])
             return models.Result(
                 body="\n".join(
@@ -229,13 +262,15 @@ class Resolve:
         match = typing.cast(Package | None, self._package.fullmatch(dependency.value))
         if not match:
             return None
-        version = packaging.version.Version(match["version"])
+        version, _requested, ranged = self._requested(match["version"])
         data = self._request_package(dependency.option, match["owner"], match["name"])
         _version = self._parse(data, version)
         if _version is None:
             return None
         value = f"{data['owner']['username']}/{data['name']} @ {_version['name']}"
-        if packaging.version.Version(_version["name"]) > version:
+        # A range is rewritten even when it already admits the newest version:
+        # replacing it with an exact pin is itself the change being proposed.
+        if ranged or packaging.version.Version(_version["name"]) > version:
             type_ = self._type_html(data["type"])
             return models.Result(
                 body="\n".join(
@@ -260,9 +295,16 @@ class Resolve:
             version (packaging.version.Version): Currently requested version.
 
         Returns:
-            Version | None: The first eligible version greater than the requested version, or the first eligible version when no greater version is available; `None` if no valid version qualifies.
+            Version | None: The highest eligible version greater than the requested version, or the highest eligible version when no greater version is available; `None` if no valid version qualifies.
         """
+        # The registry does not return versions in order -- ArduinoJson comes
+        # back as 7.2.2, 7.3.2, 6.21.6, 7.4.3, ... -- so the first candidate
+        # greater than the current one is an arbitrary newer release rather
+        # than the newest. From 7.2.0 that proposed 7.2.2 while 7.4.3 existed.
+        best = None
+        best_version = version
         latest = None
+        latest_version = None
         for _candidate in typing.cast(list[Version], data["versions"]):
             try:
                 _timestamp = datetime.datetime.fromisoformat(_candidate["released_at"])
@@ -271,14 +313,16 @@ class Resolve:
                     _timestamp.tzinfo
                 ) - _timestamp < self.cooldown:
                     continue
-                elif _version > version:
-                    return _candidate
-                elif not latest:
+                if _version > best_version:
+                    best = _candidate
+                    best_version = _version
+                if latest_version is None or _version > latest_version:
                     latest = _candidate
+                    latest_version = _version
             except packaging.version.InvalidVersion:
                 print(f"::debug::Invalid version: {data['owner']['username']}/{data['name']} {_candidate['name']}")
                 continue
-        return latest
+        return best or latest
 
     def _request_package(self, option: str, owner: str, name: str) -> Data:
         """

@@ -101,6 +101,27 @@ jobs:
           project-dir: .                  # directory containing platformio.ini
 ```
 
+## Pinning version ranges
+
+A dependency written as a range is skipped: `^2.0.9` is not a version, so there
+is nothing to compare against. `pin-ranges: true` resolves the range to the
+newest version the registry offers and rewrites the dependency as an exact pin.
+
+```yaml
+        with:
+          pin-ranges: true
+```
+
+```diff
+-    sparkfun/SparkFun BME280@^2.0.9
++    sparkfun/SparkFun BME280 @ 2.0.9
+```
+
+A change is proposed even when the range already admits the newest version,
+because replacing the range with a pin is itself the change. For firmware in
+particular, a range means the image is not reproducible from the file alone —
+two builds a month apart can link different library code.
+
 ## Choosing a token
 
 `token` defaults to the workflow token, which is enough for a repository whose
