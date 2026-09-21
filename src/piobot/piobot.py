@@ -18,6 +18,7 @@ class Piobot:
     dependencies: list[models.Dependency]
     ini: pathlib.Path
     labels: set[str]
+    pin_ranges: bool
     ref: str
     repository: str
     _git: gitpython.Repo
@@ -38,6 +39,7 @@ class Piobot:
             .relative_to(pathlib.Path.cwd())
         )
         self.labels = {label.strip() for label in os.getenv(models.Inputs.LABELS, models.Defaults.LABELS).split(",")}
+        self.pin_ranges = os.getenv(models.Inputs.PIN_RANGES, models.Defaults.PIN_RANGES).strip().lower() == "true"
         self.ref = os.getenv("GITHUB_REF_NAME", "")
         self.repository = os.getenv("GITHUB_REPOSITORY", "")
         self._token = os.getenv("GITHUB_TOKEN", "")
@@ -199,7 +201,7 @@ class Piobot:
 
         Unresolved dependencies remain available for subsequent resolver methods, while resolution errors are reported as warnings.
         """
-        resolve = platformio.Resolve(self.cooldown)
+        resolve = platformio.Resolve(self.cooldown, self.pin_ranges)
         for description, handler in {
             "package": resolve.package,
             "name": resolve.name,

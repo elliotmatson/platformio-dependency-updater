@@ -662,9 +662,7 @@ class Resolve:
         except requests.exceptions.RequestException:
             print(f"::debug::Invalid release: {name} {tag}")
 
-        current_timestamp = (
-            datetime.datetime.fromisoformat(current_published_at) if current_published_at else None
-        )
+        current_timestamp = datetime.datetime.fromisoformat(current_published_at) if current_published_at else None
         latest = None
         best = None
         best_version = version
