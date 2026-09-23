@@ -12,6 +12,26 @@ import github as pygithub
 from . import models
 from .providers import arduino, bitbucket, espressif, github, gitlab, platformio
 
+# Git refuses a ref containing a space, and registry packages are routinely
+# named with one -- `adafruit/Adafruit NeoPixel`, `sparkfun/SparkFun BME280`.
+# Interpolating the package name straight into the branch produced
+# `refs/heads/dependabot/platformio/adafruit/Adafruit NeoPixel-1.15.5`, which
+# git rejects, so those packages were resolved correctly and then silently
+# never proposed. `/` is kept: the branch layout is intentionally nested.
+_REF_UNSAFE = re.compile(r"[^A-Za-z0-9._/-]+")
+
+
+def ref_safe(value: str) -> str:
+    """Return `value` reduced to characters that are legal inside a git ref."""
+    safe = _REF_UNSAFE.sub("-", value)
+    # `..` and a trailing `.lock` are rejected even though every character is legal.
+    safe = re.sub(r"\.{2,}", ".", safe)
+    safe = re.sub(r"([-/]){2,}", r"\1", safe)
+    safe = safe.strip("-/.")
+    if safe.endswith(".lock"):
+        safe = safe[: -len(".lock")] + "-lock"
+    return safe or "package"
+
 
 class Piobot:
     cooldown: datetime.timedelta
@@ -243,14 +263,16 @@ class Piobot:
 
         The update is skipped when an equivalent branch or pull request already exists, or when the open pull request limit is reached. An older matching pull request is closed and its branch deleted when superseded.
         """
-        head = f"dependabot/platformio/{'' if str(self.ini.parent) == '.' else f'{re.sub(r"[^a-z0-9/]", "", str(self.ini.parent).lower())}/'}{result.package}-{result.version_to}"
+        directory = "" if str(self.ini.parent) == "." else f"{re.sub(r'[^a-z0-9/]', '', str(self.ini.parent).lower())}/"
+        package, version = ref_safe(result.package), ref_safe(result.version_to)
+        head = f"dependabot/platformio/{directory}{package}-{version}"
         if head in self._git.heads:
             return
         repo = self._github.get_repo(self.repository)
         if repo.get_pulls(base=self.ref, head=f"{repo.owner.login}:{head}", state="all").totalCount > 0:
             return
         pulls = repo.get_pulls(base=self.ref, state="open")
-        _pr = next((pr for pr in pulls if pr.head.ref.startswith(head.removesuffix(result.version_to))), None)
+        _pr = next((pr for pr in pulls if pr.head.ref.startswith(head.removesuffix(version))), None)
         if _pr is None and sum(1 for pr in pulls if pr.head.ref.startswith("dependabot/platformio/")) >= int(
             os.getenv(models.Inputs.OPEN_PULL_REQUESTS_LIMIT, models.Defaults.OPEN_PULL_REQUESTS_LIMIT)
         ):
