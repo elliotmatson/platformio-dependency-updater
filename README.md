@@ -167,8 +167,19 @@ If a dependency cannot be resolved, it will be reported as an unresolved depende
 ### A registry package is never updated
 
 Registry package names may contain spaces, such as `adafruit/Adafruit NeoPixel`.
-These are matched and requested correctly; if one is still skipped, check that
-it is pinned to an exact version rather than a range.
+These are matched, requested and branched correctly. If one is still skipped,
+check that it is pinned to an exact version, or that `pin-ranges` is set.
+
+Before `cc-v1.2.1` a name containing a space was resolved correctly and then
+dropped at branch creation, because the space made the ref invalid:
+
+```
+##[warning]Invalid reference 'refs/heads/dependabot/platformio/adafruit/Adafruit NeoPixel-1.15.5'
+```
+
+The run stayed green and reported the update in its summary, so the only sign
+was a dependency that never got a pull request. If you see that warning, the
+action is older than `cc-v1.2.1`.
 
 ### Pull requests does not appear
 
